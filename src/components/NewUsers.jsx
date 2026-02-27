@@ -14,6 +14,26 @@ const NewUsers = () => {
   const [currentProductIndex, setCurrentProductIndex] = useState(0);
   const [currentImageIndex, setCurrentImageIndex] = useState(0);
   const [otp, setOtp] = useState("");
+  
+  // Updated state for multiple rejection reasons
+  const [rejectionReasons, setRejectionReasons] = useState([]);
+  const [selectedRejectionReason, setSelectedRejectionReason] = useState("");
+  const [customReason, setCustomReason] = useState("");
+  const [showRejectionInput, setShowRejectionInput] = useState(false);
+
+  // Predefined rejection reasons
+  const rejectionOptions = [
+    "Invalid business documentation",
+    "Incomplete address details",
+    "Suspicious activity detected",
+    "Duplicate registration",
+    "Invalid bank account details",
+    "Non-compliant product images",
+    "Age verification failed",
+    "Identity verification failed",
+    "Business verification failed",
+    "Other"
+  ];
 
   // Fetch users from API
   useEffect(() => {
@@ -23,9 +43,7 @@ const NewUsers = () => {
         setError(null);
 
         const API_URL = 'https://ecc-dab7cvdcceethsdz.centralindia-01.azurewebsites.net/api/NewUser/GetSupplier';
-        // const API_URL = 'http://localhost:5202/api/NewUser/GetSupplier';
         const response = await fetch(API_URL, {
-
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
@@ -58,10 +76,10 @@ const NewUsers = () => {
 
             try {
               if (user.addressUrlString) {
-                const response = await fetch(user.addressUrlString);  // Fetch .txt file
-                const addressText = await response.text();            // Read text
-                const addressJson = JSON.parse(addressText);          // Convert to JSON
-                formattedAddress = formatAddress(addressJson);        // Format for display
+                const response = await fetch(user.addressUrlString);
+                const addressText = await response.text();
+                const addressJson = JSON.parse(addressText);
+                formattedAddress = formatAddress(addressJson);
               }
             } catch (err) {
               console.error("Address fetch/parse failed:", err);
@@ -73,7 +91,7 @@ const NewUsers = () => {
               name: user.userName,
               email: user.email,
               company: user.businessName,
-              address: formattedAddress,  // Final clean formatted address
+              address: formattedAddress,
               phone: user.phone,
               status: user.status || "pending",
               registrationDate: new Date(user.lastLogTime).toLocaleDateString(),
@@ -91,12 +109,8 @@ const NewUsers = () => {
               accountNumber: user.accountNumber,
               ifscCode: user.ifscCode
             };
-
           })
-
         );
-
-
 
         setUsers(transformedUsers);
       } catch (err) {
@@ -116,14 +130,16 @@ const NewUsers = () => {
     setCurrentProductIndex(0);
     setCurrentImageIndex(0);
     setOtp("");
+    setShowRejectionInput(false);
+    setRejectionReasons([]);
+    setSelectedRejectionReason("");
+    setCustomReason("");
   };
 
   const handleApprovedUser = async (id) => {
-
     try {
-      // const generatedOtp = Math.floor(100000 + Math.random() * 900000).toString();
-       console.log("sdhdjug")
-      // Here you would call your OTP API
+      console.log("sdhdjug")
+      
       await fetch(`https://ecc-dab7cvdcceethsdz.centralindia-01.azurewebsites.net/api/VerifySupp/VerifySup`, {
         method: 'POST',
         headers: {
@@ -134,7 +150,7 @@ const NewUsers = () => {
         })
       });
 
-      alert(`Verification  has been sent to user ${id}. User will verify on their platform.`);
+      alert(`Verification has been sent to user ${id}. User will verify on their platform.`);
       
       setShowModal(false);
     } catch (err) {
@@ -158,30 +174,77 @@ const NewUsers = () => {
     }
   };
 
-  const handleRejectUser = async (userId, productId) => {
+  // New function to add rejection reason
+  const handleAddRejectionReason = () => {
+    if (selectedRejectionReason === "Other" && customReason.trim()) {
+      setRejectionReasons([...rejectionReasons, customReason.trim()]);
+      setCustomReason("");
+      setSelectedRejectionReason("");
+    } else if (selectedRejectionReason && selectedRejectionReason !== "Other") {
+      setRejectionReasons([...rejectionReasons, selectedRejectionReason]);
+      setSelectedRejectionReason("");
+    }
+  };
+
+  // New function to remove rejection reason
+  const handleRemoveRejectionReason = (index) => {
+    setRejectionReasons(rejectionReasons.filter((_, i) => i !== index));
+  };
+
+  const handleRejectUser = async () => {
+    if (!selectedUser) return;
+
+    // If rejection input is not shown, show it first
+    if (!showRejectionInput) {
+      setShowRejectionInput(true);
+      return;
+    }
+
+    // Validate at least one rejection reason
+    if (rejectionReasons.length === 0) {
+      alert("Please add at least one rejection reason.");
+      return;
+    }
+
+    // Combine all rejection reasons into a single string
+    const combinedRejectionMessage = rejectionReasons.join(", ");
+
     if (window.confirm("Are you sure you want to reject this user?")) {
       try {
-        // Here you would call your reject user API
-        await fetch(`https://ecc-dab7cvdcceethsdz.centralindia-01.azurewebsites.net/api/DeleteNewSupp/DelSupplier`, {
-          method: 'DELETE',
+        const response = await fetch(`https://ecc-dab7cvdcceethsdz.centralindia-01.azurewebsites.net/api/VerifySupp/RejectSupplier`, {
+          method: 'POST',
           headers: {
             'Content-Type': 'application/json',
           },
           body: JSON.stringify({
-            supplierid: userId,
-            productid: productId
-
+            supplierId: selectedUser.id,
+            rejectionMessage: combinedRejectionMessage
           })
         });
 
-        setUsers(users.filter(user => user.id !== id));
+        if (!response.ok) {
+          throw new Error(`HTTP error! status: ${response.status}`);
+        }
+
+        setUsers(users.filter(user => user.id !== selectedUser.id));
         setShowModal(false);
-        alert("User has been rejected.");
+        setShowRejectionInput(false);
+        setRejectionReasons([]);
+        setSelectedRejectionReason("");
+        setCustomReason("");
+        alert("User has been rejected successfully.");
       } catch (err) {
         alert('Failed to reject user. Please try again.');
         console.error('Error rejecting user:', err);
       }
     }
+  };
+
+  const handleCancelRejection = () => {
+    setShowRejectionInput(false);
+    setRejectionReasons([]);
+    setSelectedRejectionReason("");
+    setCustomReason("");
   };
 
   // Product Navigation
@@ -461,8 +524,12 @@ const NewUsers = () => {
                   <div className="detail-item">
                     <label>Account Holder name:</label>
                     <span>{selectedUser.accountHolderName}</span>
+                  </div>
+                  <div className="detail-item">
                     <label>Account Number:</label>
                     <span>{selectedUser.accountNumber}</span>
+                  </div>
+                  <div className="detail-item">
                     <label>IFSC code:</label>
                     <span>{selectedUser.ifscCode}</span>
                   </div>
@@ -571,16 +638,80 @@ const NewUsers = () => {
                       <div className="image-counter">
                         Image {currentImageIndex + 1} of {getCurrentProduct()?.images?.length || 0}
                       </div>
-                      {/* <div className="completion-status">
-                        {isLastProduct() ? (
-                          <span className="status-complete">✅ All products reviewed</span>
-                        ) : (
-                          <span className="status-incomplete">⏳ Review all products to send OTP</span>
-                        )}
-                      </div> */}
                     </div>
                   </div>
                 </div>
+
+                {/* Rejection Reasons Section - Updated */}
+                {showRejectionInput && (
+                  <div className="detail-section full-width rejection-section">
+                    <h3>Rejection Reasons</h3>
+                    
+                    {/* Selected Reasons Tags */}
+                    {rejectionReasons.length > 0 && (
+                      <div className="rejection-tags-container">
+                        {rejectionReasons.map((reason, index) => (
+                          <div key={index} className="rejection-tag">
+                            <span className="rejection-tag-text">{reason}</span>
+                            <button
+                              className="rejection-tag-remove"
+                              onClick={() => handleRemoveRejectionReason(index)}
+                              title="Remove reason"
+                            >
+                              ×
+                            </button>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+
+                    {/* Dropdown and Add Button */}
+                    <div className="rejection-input-group">
+                      <select
+                        value={selectedRejectionReason}
+                        onChange={(e) => setSelectedRejectionReason(e.target.value)}
+                        className="rejection-select"
+                      >
+                        <option value="">Select a reason...</option>
+                        {rejectionOptions.map((option, index) => (
+                          <option key={index} value={option}>
+                            {option}
+                          </option>
+                        ))}
+                      </select>
+                      
+                      <button
+                        className="btn btn-primary add-reason-btn"
+                        onClick={handleAddRejectionReason}
+                        disabled={!selectedRejectionReason || (selectedRejectionReason === "Other" && !customReason.trim())}
+                      >
+                        Add Reason
+                      </button>
+                    </div>
+
+                    {/* Custom Reason Input for "Other" */}
+                    {selectedRejectionReason === "Other" && (
+                      <div className="custom-reason-input">
+                        <input
+                          type="text"
+                          value={customReason}
+                          onChange={(e) => setCustomReason(e.target.value)}
+                          placeholder="Enter custom reason..."
+                          className="custom-reason-field"
+                        />
+                      </div>
+                    )}
+
+                    <div className="rejection-actions">
+                      <button
+                        className="btn btn-secondary"
+                        onClick={handleCancelRejection}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </div>
+                )}
               </div>
             </div>
 
@@ -591,26 +722,31 @@ const NewUsers = () => {
                   title="Approved user"
                   onClick={() => handleApprovedUser(selectedUser.id)}
                 >
-                  Approved user
+                  Approve User
                 </button>
               )}
 
-
               <button
                 className="btn btn-danger"
-                onClick={() => handleRejectUser(selectedUser.id)}
+                onClick={handleRejectUser}
               >
                 <span className="btn-icon">❌</span>
-                Reject User
+                {showRejectionInput ? "Confirm Rejection" : "Reject User"}
               </button>
+              
               <button
                 className="btn btn-secondary"
-                onClick={() => setShowModal(false)}
+                onClick={() => {
+                  setShowModal(false);
+                  setShowRejectionInput(false);
+                  setRejectionReasons([]);
+                  setSelectedRejectionReason("");
+                  setCustomReason("");
+                }}
               >
                 Close
               </button>
             </div>
-
           </div>
         </div>
       )}
