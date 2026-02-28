@@ -19,6 +19,12 @@ const OldUsers = () => {
   const [editedAmount, setEditedAmount] = useState("");
   const [editHistory, setEditHistory] = useState([]);
 
+  // New state for enhanced navigation
+  const [showProductGrid, setShowProductGrid] = useState(false);
+  const [productSearchTerm, setProductSearchTerm] = useState("");
+  const [showBulkApprove, setShowBulkApprove] = useState(false);
+  const [selectedProducts, setSelectedProducts] = useState([]);
+
   useEffect(() => {
     const fetchUsers = async () => {
       try {
@@ -54,7 +60,7 @@ const OldUsers = () => {
             .join(", ");
         }
 
-        // Group products by userId since each user might have multiple products
+        // Group products by userId
         const userMap = new Map();
 
         await Promise.all(
@@ -73,9 +79,9 @@ const OldUsers = () => {
               formattedAddress = "Unable to load address";
             }
 
-            // Create product object from the item
+            // Create product object
             const product = {
-              id: item.productId,                    // Using productId as product id
+              id: item.productId,
               name: item.productName,
               productId: item.productId,
               amount: `₹${parseFloat(item.updatedPrice || item.price || 0).toLocaleString('en-IN')}`,
@@ -90,18 +96,18 @@ const OldUsers = () => {
               discountPrice: item.discountPrice
             };
 
-            // Check if user already exists in map
             if (userMap.has(item.userId)) {
-              // Add product to existing user
               const existingUser = userMap.get(item.userId);
               existingUser.products.push(product);
               // Update user status if any product is pending
               if (item.isApproved !== "approved") {
                 existingUser.status = "pending";
               }
+              // Update total revenue
+              const totalRevenue = existingUser.products.reduce((sum, p) => sum + (p.price || 0), 0);
+              existingUser.revenue = `₹${totalRevenue.toLocaleString('en-IN')}`;
               userMap.set(item.userId, existingUser);
             } else {
-              // Create new user with this product
               const newUser = {
                 id: item.userId,
                 name: item.businessName || "N/A",
@@ -121,7 +127,6 @@ const OldUsers = () => {
           })
         );
 
-        // Convert map to array
         const transformedUsers = Array.from(userMap.values());
         setUsers(transformedUsers);
         console.log("Transformed users:", transformedUsers);
@@ -142,6 +147,10 @@ const OldUsers = () => {
     setCurrentProductIndex(0);
     setCurrentImageIndex(0);
     setIsEditingAmount(false);
+    setShowProductGrid(false);
+    setProductSearchTerm("");
+    setShowBulkApprove(false);
+    setSelectedProducts([]);
   };
 
   const handleApproveProduct = async (userId, productId, editedAmount) => {
@@ -158,7 +167,6 @@ const OldUsers = () => {
         return;
       }
 
-      // Safely determine raw amount string
       let rawAmount;
       if (editedAmount) {
         rawAmount = editedAmount;
@@ -171,7 +179,6 @@ const OldUsers = () => {
         return;
       }
 
-      // Parse to number
       const numericAmount = parseFloat(rawAmount.toString().replace(/[₹$,]/g, ""));
 
       console.log("Parsed amount:", numericAmount);
@@ -198,7 +205,6 @@ const OldUsers = () => {
         throw new Error("Approve product API failed");
       }
 
-      // Format amount in INR
       const formattedAmount = `₹${numericAmount.toLocaleString("en-IN", {
         minimumFractionDigits: 0,
         maximumFractionDigits: 0
@@ -220,10 +226,13 @@ const OldUsers = () => {
                       }
                     : p
                 ),
-                // Update user status only if all products are approved
                 status: user.products.every(p => 
                   p.id === productId ? true : p.status === "approved"
-                ) ? "approved" : "pending"
+                ) ? "approved" : "pending",
+                revenue: `₹${user.products
+                  .map(p => p.id === productId ? numericAmount : (p.price || 0))
+                  .reduce((sum, price) => sum + price, 0)
+                  .toLocaleString('en-IN')}`
               }
             : user
         )
@@ -245,20 +254,51 @@ const OldUsers = () => {
           ),
           status: prev.products.every(p => 
             p.id === productId ? true : p.status === "approved"
-          ) ? "approved" : "pending"
+          ) ? "approved" : "pending",
+          revenue: `₹${prev.products
+            .map(p => p.id === productId ? numericAmount : (p.price || 0))
+            .reduce((sum, price) => sum + price, 0)
+            .toLocaleString('en-IN')}`
         }));
       }
 
       alert("✅ Product approved & price updated successfully");
       setIsEditingAmount(false);
       
-      // Close modal after successful approval
-      setShowModal(false);
+      // Remove selected product from bulk list if in bulk mode
+      setSelectedProducts(prev => prev.filter(id => id !== productId));
 
     } catch (err) {
       console.error(err);
       alert("❌ Failed to approve product. Please try again.");
     }
+  };
+
+  const handleBulkApprove = async () => {
+    if (selectedProducts.length === 0) {
+      alert("Please select at least one product");
+      return;
+    }
+
+    if (!window.confirm(`Are you sure you want to approve ${selectedProducts.length} products?`)) return;
+
+    let successCount = 0;
+    let failCount = 0;
+
+    for (const productId of selectedProducts) {
+      try {
+        const product = selectedUser.products.find(p => p.id === productId);
+        await handleApproveProduct(selectedUser.id, productId, product.price);
+        successCount++;
+      } catch (error) {
+        console.error(`Failed to approve product ${productId}:`, error);
+        failCount++;
+      }
+    }
+
+    alert(`✅ ${successCount} products approved successfully\n❌ ${failCount} products failed`);
+    setSelectedProducts([]);
+    setShowBulkApprove(false);
   };
 
   const handleRejectProduct = (userId, productId) => {
@@ -272,12 +312,15 @@ const OldUsers = () => {
                   ? { ...product, status: "rejected" }
                   : product
               ),
-              status: "rejected" // If one product is rejected, user status becomes rejected
+              status: "rejected",
+              revenue: `₹${user.products
+                .map(p => p.id === productId ? 0 : (p.price || 0))
+                .reduce((sum, price) => sum + price, 0)
+                .toLocaleString('en-IN')}`
             }
           : user
       ));
 
-      // Update selectedUser if it's the current one
       if (selectedUser && selectedUser.id === userId) {
         setSelectedUser(prev => ({
           ...prev,
@@ -286,16 +329,19 @@ const OldUsers = () => {
               ? { ...product, status: "rejected" }
               : product
           ),
-          status: "rejected"
+          status: "rejected",
+          revenue: `₹${prev.products
+            .map(p => p.id === productId ? 0 : (p.price || 0))
+            .reduce((sum, price) => sum + price, 0)
+            .toLocaleString('en-IN')}`
         }));
       }
 
       alert("Product has been rejected.");
-      setShowModal(false);
+      setSelectedProducts(prev => prev.filter(id => id !== productId));
     }
   };
 
-  // Function to update product amount
   const handleUpdateAmount = (userId, productId, newAmount) => {
     if (!newAmount || isNaN(newAmount) || parseFloat(newAmount) <= 0) {
       alert("Please enter a valid amount");
@@ -317,7 +363,6 @@ const OldUsers = () => {
                 ? { ...product, amount: formattedAmount, price: numericAmount }
                 : product
             ),
-            // Update revenue to show sum of all products
             revenue: `₹${user.products
               .map(p => p.id === productId ? numericAmount : (p.price || 0))
               .reduce((sum, price) => sum + price, 0)
@@ -326,7 +371,6 @@ const OldUsers = () => {
         : user
     ));
 
-    // Update selectedUser if it's the current one
     if (selectedUser && selectedUser.id === userId) {
       setSelectedUser(prev => ({
         ...prev,
@@ -342,7 +386,6 @@ const OldUsers = () => {
       }));
     }
 
-    // Add to edit history
     const product = users.find(u => u.id === userId)?.products.find(p => p.id === productId);
     if (product) {
       const editRecord = {
@@ -360,24 +403,19 @@ const OldUsers = () => {
     alert(`Amount updated to ${formattedAmount}`);
   };
 
-  // Check if admin can move to next product
   const canMoveToNextProduct = () => {
     if (!selectedUser || currentProductIndex >= selectedUser.products.length - 1) {
       return false;
     }
-
-    // Check if current product is approved
     const currentProduct = selectedUser.products[currentProductIndex];
     return currentProduct.status === "approved";
   };
 
-  // Check if all products are approved
   const areAllProductsApproved = () => {
     if (!selectedUser) return false;
     return selectedUser.products.every(product => product.status === "approved");
   };
 
-  // Product Navigation
   const handleNextProduct = () => {
     if (canMoveToNextProduct()) {
       setCurrentProductIndex(prev => prev + 1);
@@ -392,7 +430,6 @@ const OldUsers = () => {
     setIsEditingAmount(false);
   };
 
-  // Image Navigation
   const handleNextImage = () => {
     if (selectedUser && selectedUser.products[currentProductIndex]) {
       const currentProduct = selectedUser.products[currentProductIndex];
@@ -438,7 +475,10 @@ const OldUsers = () => {
     return matchesSearch && matchesStatus;
   });
 
-  // Loading state
+  const filteredProducts = selectedUser?.products.filter(product =>
+    product.name.toLowerCase().includes(productSearchTerm.toLowerCase())
+  ) || [];
+
   if (loading) {
     return (
       <div className="old-users-dashboard">
@@ -450,7 +490,6 @@ const OldUsers = () => {
     );
   }
 
-  // Error state
   if (error) {
     return (
       <div className="old-users-dashboard">
@@ -661,14 +700,181 @@ const OldUsers = () => {
       {/* User Detail Modal */}
       {showModal && selectedUser && (
         <div className="modal-overlay">
-          <div className="modal">
+          <div className="modal modal-large">
             <div className="modal-header">
-              <h2>User Details</h2>
-              <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
+              <h2>User Details - {selectedUser.name}</h2>
+              <div className="modal-header-actions">
+                {selectedUser.products.length > 5 && (
+                  <button
+                    className="btn btn-outline-primary bulk-approve-btn"
+                    onClick={() => setShowBulkApprove(!showBulkApprove)}
+                  >
+                    {showBulkApprove ? 'Cancel Bulk Approve' : '📦 Bulk Approve'}
+                  </button>
+                )}
+                <button className="modal-close" onClick={() => setShowModal(false)}>×</button>
+              </div>
             </div>
 
             <div className="modal-body">
+              {/* Quick Navigation Dropdown */}
+              <div className="quick-nav-section">
+                <div className="product-jump-dropdown">
+                  <label>Quick Jump to Product:</label>
+                  <select 
+                    value={currentProductIndex}
+                    onChange={(e) => {
+                      setCurrentProductIndex(parseInt(e.target.value));
+                      setCurrentImageIndex(0);
+                      setShowProductGrid(false);
+                    }}
+                    className="product-select"
+                  >
+                    {selectedUser.products.map((product, index) => (
+                      <option key={product.id} value={index}>
+                        {index + 1}. {product.name.substring(0, 30)}{product.name.length > 30 ? '...' : ''} - {product.amount} 
+                        [{product.status === "approved" ? "✅" : 
+                          product.status === "rejected" ? "❌" : "⏳"}]
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                {/* Product Search */}
+                <div className="product-search-section">
+                  <div className="product-search-box">
+                    <span className="search-icon">🔍</span>
+                    <input
+                      type="text"
+                      placeholder="Search products by name..."
+                      value={productSearchTerm}
+                      onChange={(e) => setProductSearchTerm(e.target.value)}
+                      className="product-search-input"
+                    />
+                  </div>
+                  {productSearchTerm && filteredProducts.length > 0 && (
+                    <div className="product-search-results">
+                      {filteredProducts.map((product) => {
+                        const actualIndex = selectedUser.products.findIndex(p => p.id === product.id);
+                        return (
+                          <div 
+                            key={product.id}
+                            className="search-result-item"
+                            onClick={() => {
+                              setCurrentProductIndex(actualIndex);
+                              setCurrentImageIndex(0);
+                              setProductSearchTerm("");
+                            }}
+                          >
+                            <span className="result-name">{product.name}</span>
+                            <span className={`result-status status-${product.status}`}>
+                              {product.status}
+                            </span>
+                            <span className="result-amount">{product.amount}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* Product Grid Toggle */}
+                <div className="product-grid-toggle">
+                  <button 
+                    className="btn btn-outline-secondary"
+                    onClick={() => setShowProductGrid(!showProductGrid)}
+                  >
+                    {showProductGrid ? 'Hide Product Grid' : '📊 Show All Products Grid'}
+                  </button>
+                </div>
+              </div>
+
+              {/* Product Grid View */}
+              {showProductGrid && (
+                <div className="product-grid">
+                  <h4>All Products ({selectedUser.products.length})</h4>
+                  <div className="product-grid-container">
+                    {selectedUser.products.map((product, index) => (
+                      <div 
+                        key={product.id}
+                        className={`product-grid-item ${currentProductIndex === index ? 'active' : ''} status-${product.status}`}
+                        onClick={() => {
+                          setCurrentProductIndex(index);
+                          setCurrentImageIndex(0);
+                          setShowProductGrid(false);
+                        }}
+                      >
+                        <div className="product-grid-image">
+                          {product.images[0] ? (
+                            <img src={product.images[0]} alt={product.name} />
+                          ) : (
+                            <span className="no-image">📷</span>
+                          )}
+                        </div>
+                        <div className="product-grid-info">
+                          <div className="product-grid-name">{product.name}</div>
+                          <div className="product-grid-amount">{product.amount}</div>
+                          <div className={`product-grid-status status-${product.status}`}>
+                            {product.status === "approved" ? "✅ Approved" : 
+                             product.status === "rejected" ? "❌ Rejected" : "⏳ Pending"}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Bulk Approve Section */}
+              {showBulkApprove && (
+                <div className="bulk-approve-section">
+                  <h4>Select Products to Approve</h4>
+                  <div className="bulk-approve-grid">
+                    {selectedUser.products.map(product => (
+                      <label key={product.id} className="bulk-approve-item">
+                        <input
+                          type="checkbox"
+                          checked={selectedProducts.includes(product.id)}
+                          onChange={(e) => {
+                            if (e.target.checked) {
+                              setSelectedProducts([...selectedProducts, product.id]);
+                            } else {
+                              setSelectedProducts(selectedProducts.filter(id => id !== product.id));
+                            }
+                          }}
+                          disabled={product.status === "approved"}
+                        />
+                        <div className="bulk-product-info">
+                          <span className="bulk-product-name">{product.name}</span>
+                          <span className="bulk-product-amount">{product.amount}</span>
+                          <span className={`bulk-product-status status-${product.status}`}>
+                            {product.status}
+                          </span>
+                        </div>
+                      </label>
+                    ))}
+                  </div>
+                  {selectedProducts.length > 0 && (
+                    <div className="bulk-actions">
+                      <button 
+                        className="btn btn-success"
+                        onClick={handleBulkApprove}
+                      >
+                        ✅ Approve Selected ({selectedProducts.length})
+                      </button>
+                      <button 
+                        className="btn btn-secondary"
+                        onClick={() => setSelectedProducts([])}
+                      >
+                        Clear Selection
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="user-details-grid">
+                {/* User Information Sections */}
                 <div className="detail-section">
                   <h3>Personal Information</h3>
                   <div className="detail-item">
@@ -718,7 +924,7 @@ const OldUsers = () => {
                 </div>
 
                 <div className="detail-section">
-                  <h3>Current Product</h3>
+                  <h3>Current Product ({currentProductIndex + 1} of {selectedUser.products.length})</h3>
                   <div className="detail-item">
                     <label>Product/Service:</label>
                     <span>{getCurrentProduct()?.name}</span>
@@ -810,7 +1016,7 @@ const OldUsers = () => {
                   </div>
                 </div>
 
-                {/* Product Images Section with Dual Navigation */}
+                {/* Product Images Section */}
                 <div className="detail-section full-width">
                   <h3>Product Images</h3>
                   <div className="product-images-container">
@@ -908,7 +1114,7 @@ const OldUsers = () => {
                               const amountToSend = isEditingAmount ? editedAmount : undefined;
                               handleApproveProduct(
                                 selectedUser.id,
-                                getCurrentProduct().id, // Use .id which equals productId
+                                getCurrentProduct().id,
                                 amountToSend
                               );
                             }}

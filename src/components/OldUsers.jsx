@@ -25,6 +25,28 @@ const OldUsers = () => {
   const [showBulkApprove, setShowBulkApprove] = useState(false);
   const [selectedProducts, setSelectedProducts] = useState([]);
 
+  // New state for product rejection reasons
+  const [showRejectionInput, setShowRejectionInput] = useState(false);
+  const [rejectionReasons, setRejectionReasons] = useState([]);
+  const [selectedRejectionReason, setSelectedRejectionReason] = useState("");
+  const [customReason, setCustomReason] = useState("");
+  const [rejectingProductId, setRejectingProductId] = useState(null);
+
+  // Predefined rejection reasons
+  const rejectionOptions = [
+    "Invalid product documentation",
+    "Poor image quality",
+    "Incorrect pricing",
+    "Product category mismatch",
+    "Incomplete product details",
+    "Copyright infringement",
+    "Prohibited item",
+    "Misleading description",
+    "Quality standards not met",
+    "Duplicate product listing",
+    "Other"
+  ];
+
   useEffect(() => {
     const fetchUsers = async () => {
       try {
@@ -151,6 +173,11 @@ const OldUsers = () => {
     setProductSearchTerm("");
     setShowBulkApprove(false);
     setSelectedProducts([]);
+    setShowRejectionInput(false);
+    setRejectionReasons([]);
+    setSelectedRejectionReason("");
+    setCustomReason("");
+    setRejectingProductId(null);
   };
 
   const handleApproveProduct = async (userId, productId, editedAmount) => {
@@ -301,26 +328,87 @@ const OldUsers = () => {
     setShowBulkApprove(false);
   };
 
-  const handleRejectProduct = (userId, productId) => {
-    if (window.confirm("Are you sure you want to reject this product?")) {
-      setUsers(users.map(user =>
-        user.id === userId
-          ? {
-              ...user,
-              products: user.products.map(product =>
-                product.id === productId
-                  ? { ...product, status: "rejected" }
-                  : product
-              ),
-              status: "rejected",
-              revenue: `₹${user.products
-                .map(p => p.id === productId ? 0 : (p.price || 0))
-                .reduce((sum, price) => sum + price, 0)
-                .toLocaleString('en-IN')}`
-            }
-          : user
-      ));
+  // New function to add rejection reason
+  const handleAddRejectionReason = () => {
+    if (selectedRejectionReason === "Other" && customReason.trim()) {
+      setRejectionReasons([...rejectionReasons, customReason.trim()]);
+      setCustomReason("");
+      setSelectedRejectionReason("");
+    } else if (selectedRejectionReason && selectedRejectionReason !== "Other") {
+      setRejectionReasons([...rejectionReasons, selectedRejectionReason]);
+      setSelectedRejectionReason("");
+    }
+  };
 
+  // New function to remove rejection reason
+  const handleRemoveRejectionReason = (index) => {
+    setRejectionReasons(rejectionReasons.filter((_, i) => i !== index));
+  };
+
+  // Updated reject product handler with multiple reasons
+  const handleRejectProduct = async (userId, productId) => {
+    if (!userId || !productId) return;
+
+    // If rejection input is not shown for this product, show it
+    if (!showRejectionInput || rejectingProductId !== productId) {
+      setRejectingProductId(productId);
+      setShowRejectionInput(true);
+      setRejectionReasons([]);
+      setSelectedRejectionReason("");
+      setCustomReason("");
+      return;
+    }
+
+    // Validate at least one rejection reason
+    if (rejectionReasons.length === 0) {
+      alert("Please add at least one rejection reason.");
+      return;
+    }
+
+    if (!window.confirm("Are you sure you want to reject this product?")) return;
+
+    try {
+      const response = await fetch(
+        "https://ecc-dab7cvdcceethsdz.centralindia-01.azurewebsites.net/api/VerifySupp/RejectProduct",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+          },
+          body: JSON.stringify({
+            productId: productId,
+            supplierId: userId,
+            rejections: rejectionReasons
+          }),
+        }
+      );
+
+      if (!response.ok) {
+        throw new Error(`HTTP error! status: ${response.status}`);
+      }
+
+      // Update local state
+      setUsers(prev =>
+        prev.map(user =>
+          user.id === userId
+            ? {
+                ...user,
+                products: user.products.map(product =>
+                  product.id === productId
+                    ? { ...product, status: "rejected" }
+                    : product
+                ),
+                status: "rejected",
+                revenue: `₹${user.products
+                  .map(p => p.id === productId ? 0 : (p.price || 0))
+                  .reduce((sum, price) => sum + price, 0)
+                  .toLocaleString('en-IN')}`
+              }
+            : user
+        )
+      );
+
+      // Update selected user if modal is open
       if (selectedUser && selectedUser.id === userId) {
         setSelectedUser(prev => ({
           ...prev,
@@ -337,9 +425,30 @@ const OldUsers = () => {
         }));
       }
 
-      alert("Product has been rejected.");
+      // Reset rejection states
+      setShowRejectionInput(false);
+      setRejectionReasons([]);
+      setSelectedRejectionReason("");
+      setCustomReason("");
+      setRejectingProductId(null);
+      
+      // Remove from selected products if in bulk mode
       setSelectedProducts(prev => prev.filter(id => id !== productId));
+      
+      alert("✅ Product rejected successfully");
+
+    } catch (err) {
+      console.error("Rejection error:", err);
+      alert("❌ Failed to reject product. Please try again.");
     }
+  };
+
+  const handleCancelRejection = () => {
+    setShowRejectionInput(false);
+    setRejectionReasons([]);
+    setSelectedRejectionReason("");
+    setCustomReason("");
+    setRejectingProductId(null);
   };
 
   const handleUpdateAmount = (userId, productId, newAmount) => {
@@ -421,6 +530,9 @@ const OldUsers = () => {
       setCurrentProductIndex(prev => prev + 1);
       setCurrentImageIndex(0);
       setIsEditingAmount(false);
+      setShowRejectionInput(false);
+      setRejectionReasons([]);
+      setRejectingProductId(null);
     }
   };
 
@@ -428,6 +540,9 @@ const OldUsers = () => {
     setCurrentProductIndex(prev => prev > 0 ? prev - 1 : prev);
     setCurrentImageIndex(0);
     setIsEditingAmount(false);
+    setShowRejectionInput(false);
+    setRejectionReasons([]);
+    setRejectingProductId(null);
   };
 
   const handleNextImage = () => {
@@ -727,6 +842,9 @@ const OldUsers = () => {
                       setCurrentProductIndex(parseInt(e.target.value));
                       setCurrentImageIndex(0);
                       setShowProductGrid(false);
+                      setShowRejectionInput(false);
+                      setRejectionReasons([]);
+                      setRejectingProductId(null);
                     }}
                     className="product-select"
                   >
@@ -764,6 +882,9 @@ const OldUsers = () => {
                               setCurrentProductIndex(actualIndex);
                               setCurrentImageIndex(0);
                               setProductSearchTerm("");
+                              setShowRejectionInput(false);
+                              setRejectionReasons([]);
+                              setRejectingProductId(null);
                             }}
                           >
                             <span className="result-name">{product.name}</span>
@@ -802,6 +923,9 @@ const OldUsers = () => {
                           setCurrentProductIndex(index);
                           setCurrentImageIndex(0);
                           setShowProductGrid(false);
+                          setShowRejectionInput(false);
+                          setRejectionReasons([]);
+                          setRejectingProductId(null);
                         }}
                       >
                         <div className="product-grid-image">
@@ -1104,6 +1228,77 @@ const OldUsers = () => {
                       )}
                     </div>
 
+                    {/* Rejection Reasons Section - New */}
+                    {showRejectionInput && rejectingProductId === getCurrentProduct()?.id && (
+                      <div className="rejection-section">
+                        <h4>Rejection Reasons</h4>
+                        
+                        {/* Selected Reasons Tags */}
+                        {rejectionReasons.length > 0 && (
+                          <div className="rejection-tags-container">
+                            {rejectionReasons.map((reason, index) => (
+                              <div key={index} className="rejection-tag">
+                                <span className="rejection-tag-text">{reason}</span>
+                                <button
+                                  className="rejection-tag-remove"
+                                  onClick={() => handleRemoveRejectionReason(index)}
+                                  title="Remove reason"
+                                >
+                                  ×
+                                </button>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {/* Dropdown and Add Button */}
+                        <div className="rejection-input-group">
+                          <select
+                            value={selectedRejectionReason}
+                            onChange={(e) => setSelectedRejectionReason(e.target.value)}
+                            className="rejection-select"
+                          >
+                            <option value="">Select a reason...</option>
+                            {rejectionOptions.map((option, index) => (
+                              <option key={index} value={option}>
+                                {option}
+                              </option>
+                            ))}
+                          </select>
+                          
+                          <button
+                            className="btn btn-primary add-reason-btn"
+                            onClick={handleAddRejectionReason}
+                            disabled={!selectedRejectionReason || (selectedRejectionReason === "Other" && !customReason.trim())}
+                          >
+                            Add Reason
+                          </button>
+                        </div>
+
+                        {/* Custom Reason Input for "Other" */}
+                        {selectedRejectionReason === "Other" && (
+                          <div className="custom-reason-input">
+                            <input
+                              type="text"
+                              value={customReason}
+                              onChange={(e) => setCustomReason(e.target.value)}
+                              placeholder="Enter custom reason..."
+                              className="custom-reason-field"
+                            />
+                          </div>
+                        )}
+
+                        <div className="rejection-actions">
+                          <button
+                            className="btn btn-secondary"
+                            onClick={handleCancelRejection}
+                          >
+                            Cancel
+                          </button>
+                        </div>
+                      </div>
+                    )}
+
                     {/* Product Approval Actions */}
                     {getCurrentProduct()?.status === "pending" && (
                       <div className="product-actions">
@@ -1128,7 +1323,9 @@ const OldUsers = () => {
                             onClick={() => handleRejectProduct(selectedUser.id, getCurrentProduct()?.id)}
                           >
                             <span className="btn-icon">❌</span>
-                            Reject Product
+                            {showRejectionInput && rejectingProductId === getCurrentProduct()?.id 
+                              ? "Confirm Rejection" 
+                              : "Reject Product"}
                           </button>
                         </div>
                         {isEditingAmount && (
